@@ -114,6 +114,18 @@ func (client *Client) doJsonRequest(method, api string,
 	return nil
 }
 
+// doJsonRequest is the simplest type of request: a method on a URI that
+// returns some JSON result which we unmarshal into the passed interface. It
+// wraps doJsonRequestUnredacted to redact api and application keys from
+// errors.
+func (client *Client) doJsonRequestWithReader(method, api string, headers map[string]string,
+	reqbody io.Reader, out interface{}) error {
+	if err := client.doJsonRequestUnredactedWithReader(method, api, headers, reqbody, out); err != nil {
+		return client.redactError(err)
+	}
+	return nil
+}
+
 // doJsonRequestUnredacted is the simplest type of request: a method on a URI that returns
 // some JSON result which we unmarshal into the passed interface.
 func (client *Client) doJsonRequestUnredacted(method, api string,
@@ -123,7 +135,27 @@ func (client *Client) doJsonRequestUnredacted(method, api string,
 		return err
 	}
 	// Perform the request and retry it if it's not a POST or PUT request
+	return client.doJsonRequestUnredactedHelper(method, req, out)
+}
+
+// doJsonRequestUnredacted is the simplest type of request: a method on a URI that returns
+// some JSON result which we unmarshal into the passed interface.
+func (client *Client) doJsonRequestUnredactedWithReader(method, api string, headers map[string]string,
+	reqbody io.Reader, out interface{}) error {
+	req, err := client.createRequestWithReader(method, api, reqbody, headers)
+	if err != nil {
+		return err
+	}
+	// Perform the request and retry it if it's not a POST or PUT request
+	return client.doJsonRequestUnredactedHelper(method, req, out)
+}
+
+// doJsonRequestUnredacted is the simplest type of request: a method on a URI that returns
+// some JSON result which we unmarshal into the passed interface.
+func (client *Client) doJsonRequestUnredactedHelper(method string, req *http.Request, out interface{}) error {
+	// Perform the request and retry it if it's not a POST or PUT request
 	var resp *http.Response
+	var err error
 	if method == "POST" || method == "PUT" {
 		resp, err = client.HttpClient.Do(req)
 	} else {
@@ -241,11 +273,26 @@ func (client *Client) createRequest(method, api string, reqbody interface{}) (*h
 		bodyReader = bytes.NewReader(bjson)
 	}
 
+	return client.createBaseRequest(method, api, bodyReader)
+}
+
+func (client *Client) createRequestWithReader(method, api string, reqbody io.Reader, headers map[string]string) (*http.Request, error) {
+	req, err := client.createBaseRequest(method, api, reqbody)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range headers {
+		req.Header.Add(k, v)
+	}
+	return req, nil
+}
+
+func (client *Client) createBaseRequest(method, api string, reqbody io.Reader) (*http.Request, error) {
 	apiUrlStr, err := client.uriForAPI(api)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequest(method, apiUrlStr, bodyReader)
+	req, err := http.NewRequest(method, apiUrlStr, reqbody)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +300,7 @@ func (client *Client) createRequest(method, api string, reqbody interface{}) (*h
 		req.Header.Set("DD-API-KEY", client.apiKey)
 		req.Header.Set("DD-APPLICATION-KEY", client.appKey)
 	}
-	if bodyReader != nil {
+	if reqbody != nil {
 		req.Header.Add("Content-Type", "application/json")
 	}
 	for k, v := range client.ExtraHeader {

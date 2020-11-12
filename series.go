@@ -9,6 +9,7 @@
 package datadog
 
 import (
+	"github.com/zorkian/go-datadog-api/compressor"
 	"net/url"
 	"strconv"
 )
@@ -74,6 +75,21 @@ type reqMetrics struct {
 func (client *Client) PostMetrics(series []Metric) error {
 	return client.doJsonRequest("POST", "/v1/series",
 		reqPostSeries{Series: series}, nil)
+}
+
+// PostCompressedMetrics takes as input a slice of metrics and a Compressor
+// and then posts the compressed data up to the server
+func (client *Client) PostCompressedMetrics(series []Metric, compressor Compressor) error {
+	b, err := compressor.Compress(reqPostSeries{Series: series})
+	if err != nil {
+		return err
+	}
+
+	headers := map[string]string{
+		"Content-Encoding": compressor.GetContentEncoding(),
+	}
+
+	return client.doJsonRequestWithReader("POST", "/v1/series", headers, b, nil)
 }
 
 // QueryMetrics takes as input from, to (seconds from Unix Epoch) and query string and then requests
